@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz Results - {{ quiz.title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Quiz Complete!</h1>
+        </header>
+
+        <main>
+            <div class="result-card">
+                <h2>{{ quiz.title }}</h2>
+
+                <div class="score-display">
+                    <div class="score-circle">
+                        <div class="score-number">{{ results.percentage|round|int }}%</div>
+                        <div class="score-label">Score</div>
+                    </div>
+                </div>
+
+                <div class="score-details">
+                    <p><strong>Correct Answers:</strong> {{ results.score }} out of {{ results.total }}</p>
+                    <p><strong>Percentage:</strong> {{ results.percentage|round(2) }}%</p>
+                </div>
+
+                <div class="performance-message">
+                    {% if results.percentage >= 90 %}
+                    <p class="excellent">Excellent! You're a master of this topic!</p>
+                    {% elif results.percentage >= 70 %}
+                    <p class="good">Great job! You have a solid understanding!</p>
+                    {% elif results.percentage >= 50 %}
+                    <p class="average">Good effort! Keep practicing to improve!</p>
+                    {% else %}
+                    <p class="needs-improvement">Keep learning! You'll do better next time!</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="leaderboard-section">
+                <h2>Add Your Name to the Leaderboard</h2>
+
+                <form id="leaderboardForm" onsubmit="submitToLeaderboard(event)">
+                    <div class="form-group">
+                        <input
+                            type="text"
+                            id="nickname"
+                            name="nickname"
+                            placeholder="Enter your nickname"
+                            maxlength="50"
+                            required
+                        >
+                        <button type="submit" class="btn btn-primary">Submit to Leaderboard</button>
+                    </div>
+                    <p id="leaderboardMessage" class="message"></p>
+                </form>
+            </div>
+
+            <div class="leaderboard-section">
+                <h2>Leaderboard - Top 10</h2>
+
+                {% if leaderboard %}
+                <div class="leaderboard-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Rank</th>
+                                <th>Player</th>
+                                <th>Score</th>
+                                <th>Percentage</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for entry in leaderboard %}
+                            <tr {% if entry.rank <= 3 %}class="top-rank top-{{ entry.rank }}"{% endif %}>
+                                <td class="rank">
+                                    {% if entry.rank == 1 %}
+                                    <span class="medal gold">🥇</span>
+                                    {% elif entry.rank == 2 %}
+                                    <span class="medal silver">🥈</span>
+                                    {% elif entry.rank == 3 %}
+                                    <span class="medal bronze">🥉</span>
+                                    {% else %}
+                                    {{ entry.rank }}
+                                    {% endif %}
+                                </td>
+                                <td class="nickname">{{ entry.nickname }}</td>
+                                <td class="score">{{ entry.score }}</td>
+                                <td class="percentage">{{ entry.percentage|round(1) }}%</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="no-entries">Be the first to join the leaderboard!</p>
+                {% endif %}
+            </div>
+
+            <div class="actions">
+                <a href="/" class="btn btn-secondary">Back to Home</a>
+                <a href="/quiz/{{ quiz.id }}" class="btn btn-primary">Retake Quiz</a>
+            </div>
+        </main>
+
+        <footer>
+            <p>Session ID: {{ session_id }}</p>
+        </footer>
+    </div>
+
+    <script>
+        const sessionId = "{{ session_id }}";
+
+        function submitToLeaderboard(event) {
+            event.preventDefault();
+
+            const nickname = document.getElementById('nickname').value.trim();
+            const messageEl = document.getElementById('leaderboardMessage');
+            const submitBtn = event.target.querySelector('button[type="submit"]');
+
+            if (!nickname) {
+                messageEl.textContent = 'Please enter a nickname';
+                messageEl.className = 'message error';
+                return;
+            }
+
+            // Disable button during submission
+            submitBtn.disabled = true;
+            messageEl.textContent = 'Submitting...';
+            messageEl.className = 'message';
+
+            fetch('/api/submit-to-leaderboard', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    nickname: nickname
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    messageEl.textContent = 'Successfully added to leaderboard! Refreshing...';
+                    messageEl.className = 'message success';
+
+                    // Refresh page to show updated leaderboard
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                } else {
+                    messageEl.textContent = 'Error: ' + (data.error || 'Unknown error');
+                    messageEl.className = 'message error';
+                    submitBtn.disabled = false;
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                messageEl.textContent = 'Error submitting to leaderboard. Please try again.';
+                messageEl.className = 'message error';
+                submitBtn.disabled = false;
+            });
+        }
+    </script>
+</body>
+</html>

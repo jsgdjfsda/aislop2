@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ quiz.title }} - Quiz App</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>{{ quiz.title }}</h1>
+            <p>{{ quiz.description }}</p>
+        </header>
+
+        <main>
+            <div class="quiz-progress">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressBar"></div>
+                </div>
+                <p class="progress-text">Question <span id="currentQuestion">1</span> of {{ questions|length }}</p>
+            </div>
+
+            <form id="quizForm">
+                {% for question in questions %}
+                <div class="question-card {% if loop.first %}active{% endif %}" data-question-index="{{ loop.index0 }}">
+                    <h3 class="question-number">Question {{ loop.index }}</h3>
+                    <p class="question-text">{{ question.question_text }}</p>
+
+                    <div class="answers-container">
+                        {% for answer in question.answers %}
+                        <label class="answer-option">
+                            <input
+                                type="radio"
+                                name="question_{{ question.id }}"
+                                value="{{ answer.id }}"
+                                data-question-id="{{ question.id }}"
+                                data-answer-id="{{ answer.id }}"
+                            >
+                            <span class="answer-text">{{ answer.answer_text }}</span>
+                        </label>
+                        {% endfor %}
+                    </div>
+
+                    <div class="question-navigation">
+                        {% if not loop.first %}
+                        <button type="button" class="btn btn-secondary" onclick="previousQuestion()">Previous</button>
+                        {% endif %}
+
+                        {% if not loop.last %}
+                        <button type="button" class="btn btn-primary" onclick="nextQuestion()">Next</button>
+                        {% else %}
+                        <button type="button" class="btn btn-success" onclick="submitQuiz()">Submit Quiz</button>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </form>
+
+            <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+                <div class="loading-spinner">
+                    <p>Calculating your results...</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const sessionId = "{{ session_id }}";
+        const totalQuestions = {{ questions|length }};
+        let currentQuestionIndex = 0;
+        const userAnswers = {};
+
+        function updateProgress() {
+            const progress = ((currentQuestionIndex + 1) / totalQuestions) * 100;
+            document.getElementById('progressBar').style.width = progress + '%';
+            document.getElementById('currentQuestion').textContent = currentQuestionIndex + 1;
+        }
+
+        function showQuestion(index) {
+            const cards = document.querySelectorAll('.question-card');
+            cards.forEach((card, i) => {
+                card.classList.toggle('active', i === index);
+            });
+            currentQuestionIndex = index;
+            updateProgress();
+        }
+
+        function nextQuestion() {
+            const currentCard = document.querySelector('.question-card.active');
+            const selectedAnswer = currentCard.querySelector('input[type="radio"]:checked');
+
+            if (!selectedAnswer) {
+                alert('Please select an answer before proceeding.');
+                return;
+            }
+
+            // Save answer
+            saveAnswer(selectedAnswer);
+
+            if (currentQuestionIndex < totalQuestions - 1) {
+                showQuestion(currentQuestionIndex + 1);
+            }
+        }
+
+        function previousQuestion() {
+            if (currentQuestionIndex > 0) {
+                showQuestion(currentQuestionIndex - 1);
+            }
+        }
+
+        function saveAnswer(inputElement) {
+            const questionId = parseInt(inputElement.dataset.questionId);
+            const answerId = parseInt(inputElement.dataset.answerId);
+
+            // Submit to backend
+            fetch('/api/submit-answer', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    question_id: questionId,
+                    answer_id: answerId
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                userAnswers[questionId] = answerId;
+            })
+            .catch(error => {
+                console.error('Error saving answer:', error);
+            });
+        }
+
+        function submitQuiz() {
+            const currentCard = document.querySelector('.question-card.active');
+            const selectedAnswer = currentCard.querySelector('input[type="radio"]:checked');
+
+            if (!selectedAnswer) {
+                alert('Please answer the current question before submitting.');
+                return;
+            }
+
+            // Save last answer
+            saveAnswer(selectedAnswer);
+
+            // Check if all questions are answered
+            const totalAnswered = Object.keys(userAnswers).length + 1; // +1 for the last answer being saved
+            if (totalAnswered < totalQuestions) {
+                if (!confirm(`You have only answered ${totalAnswered} out of ${totalQuestions} questions. Do you want to submit anyway?`)) {
+                    return;
+                }
+            }
+
+            // Show loading overlay
+            document.getElementById('loadingOverlay').style.display = 'flex';
+
+            // Wait a bit for the last answer to be saved
+            setTimeout(() => {
+                // Complete the quiz
+                fetch('/api/complete-quiz', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        session_id: sessionId
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        window.location.href = '/result/' + sessionId;
+                    } else {
+                        alert('Error submitting quiz: ' + (data.error || 'Unknown error'));
+                        document.getElementById('loadingOverlay').style.display = 'none';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error submitting quiz. Please try again.');
+                    document.getElementById('loadingOverlay').style.display = 'none';
+                });
+            }, 500);
+        }
+
+        // Allow clicking directly on questions to navigate (for testing)
+        document.addEventListener('DOMContentLoaded', function() {
+            updateProgress();
+
+            // Auto-save when answer is selected
+            document.querySelectorAll('input[type="radio"]').forEach(input => {
+                input.addEventListener('change', function() {
+                    saveAnswer(this);
+                });
+            });
+        });
+    </script>
+</body>
+</html>

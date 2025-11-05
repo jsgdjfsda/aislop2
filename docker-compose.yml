@@ -1,0 +1,151 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: quiz-postgres
+    environment:
+      POSTGRES_USER: quizuser
+      POSTGRES_PASSWORD: quizpass
+      POSTGRES_DB: quiz_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quizuser -d quiz_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - quiz-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: quiz-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - quiz-network
+
+  # Quiz Service - Manages quizzes and questions
+  quiz-service:
+    build:
+      context: ./services/quiz-service
+      dockerfile: Dockerfile
+    container_name: quiz-service
+    ports:
+      - "5001:5001"
+    environment:
+      DATABASE_URL: postgresql://quizuser:quizpass@postgres:5432/quiz_db
+      SERVICE_PORT: 5001
+      FLASK_ENV: development
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - quiz-network
+    restart: unless-stopped
+
+  # Session Service - Manages quiz sessions
+  session-service:
+    build:
+      context: ./services/session-service
+      dockerfile: Dockerfile
+    container_name: session-service
+    ports:
+      - "5002:5002"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      SERVICE_PORT: 5002
+      FLASK_ENV: development
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - quiz-network
+    restart: unless-stopped
+
+  # Results Service - Calculates and stores results
+  results-service:
+    build:
+      context: ./services/results-service
+      dockerfile: Dockerfile
+    container_name: results-service
+    ports:
+      - "5003:5003"
+    environment:
+      DATABASE_URL: postgresql://quizuser:quizpass@postgres:5432/quiz_db
+      QUIZ_SERVICE_URL: http://quiz-service:5001
+      SESSION_SERVICE_URL: http://session-service:5002
+      SERVICE_PORT: 5003
+      FLASK_ENV: development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      quiz-service:
+        condition: service_started
+      session-service:
+        condition: service_started
+    networks:
+      - quiz-network
+    restart: unless-stopped
+
+  # Leaderboard Service - Manages high scores
+  leaderboard-service:
+    build:
+      context: ./services/leaderboard-service
+      dockerfile: Dockerfile
+    container_name: leaderboard-service
+    ports:
+      - "5004:5004"
+    environment:
+      DATABASE_URL: postgresql://quizuser:quizpass@postgres:5432/quiz_db
+      SERVICE_PORT: 5004
+      FLASK_ENV: development
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - quiz-network
+    restart: unless-stopped
+
+  # Frontend - Web UI
+  frontend:
+    build:
+      context: ./services/frontend
+      dockerfile: Dockerfile
+    container_name: quiz-frontend
+    ports:
+      - "5000:5000"
+    environment:
+      QUIZ_SERVICE_URL: http://quiz-service:5001
+      SESSION_SERVICE_URL: http://session-service:5002
+      RESULTS_SERVICE_URL: http://results-service:5003
+      LEADERBOARD_SERVICE_URL: http://leaderboard-service:5004
+      SERVICE_PORT: 5000
+      FLASK_ENV: development
+    depends_on:
+      - quiz-service
+      - session-service
+      - results-service
+      - leaderboard-service
+    networks:
+      - quiz-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  quiz-network:
+    driver: bridge
